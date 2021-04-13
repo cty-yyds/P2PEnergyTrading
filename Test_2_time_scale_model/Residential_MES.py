@@ -3,6 +3,20 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
+def check_1h_15min_data(env):
+    for i in range(24):
+        solar_1h = env.generation_demand_1hour.iloc[i, 0]
+        e_load_1h = env.generation_demand_1hour.iloc[i, 1]
+        h_load_1h = env.generation_demand_1hour.iloc[i, 2]
+        solar_15min = env.generation_demand_15min.iloc[i*4:i*4+4, 0].sum()
+        e_load_15min = env.generation_demand_15min.iloc[i*4:i*4+4, 1].sum()
+        h_load_15min = env.generation_demand_15min.iloc[i*4:i*4+4, 2].sum()
+        assert solar_1h == solar_15min, f"solar not met at {i} hour"
+        assert e_load_1h == e_load_15min, f"e load not met at {i} hour"
+        assert h_load_1h == h_load_15min, f"h load not met at {i} hour"
+    print("We are good")
+
+
 class ResidentialMicrogrid:
     def __init__(self, B_e, B_h2, pes_max, HT_p_max):
         self.n_features_1h = 6  # state: solar,E-H_demand,battery,h2_level,E_price
