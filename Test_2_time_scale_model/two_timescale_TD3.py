@@ -66,15 +66,17 @@ class TwoTimescaleTD3:
                  tau, q_lr, mu_lr, gamma, batch_size, replay_capacity):
         self.tau = tau
         self.gamma = gamma
+        self.n_whole_s_1h = n_states_1h + (n_states_15min-3) * 4
+        self.n_whole_a_1h = n_actions_1h + n_actions_15min * 4
         self.loss_fn = tf.keras.losses.mean_squared_error
         self.q_optimizer = tf.keras.optimizers.Nadam(learning_rate=q_lr)
         self.mu_optimizer = tf.keras.optimizers.Nadam(learning_rate=mu_lr)
-        self.memory_1h = ReplayBuffer(n_states_1h, n_actions_1h, replay_capacity, batch_size)
+        self.memory_1h = ReplayBuffer(self.n_whole_s_1h, self.n_whole_a_1h+n_actions_1h, replay_capacity, batch_size)
         self.memory_15min = ReplayBuffer(n_states_15min, n_actions_15min, replay_capacity, batch_size)
 
-        # Now create the model (2 timescale, double Q, target networks)
+        # Now create the model (2 timescale, double Q, target networks) whole centralised critic with 4 15min s and a
         self.mu_1h, self.t_mu_1h = create_actor(n_states_1h, n_actions_1h)
-        self.q_1h, self.t_q_1h, self.q2_1h, self.t_q2_1h = create_critic(n_states_1h, n_actions_1h)
+        self.q_1h, self.t_q_1h, self.q2_1h, self.t_q2_1h = create_critic(self.n_whole_s_1h, self.n_whole_a_1h)
 
         self.mu_15min, self.t_mu_15min = create_actor(n_states_15min, n_actions_15min)
         self.q_15min, self.t_q_15min, self.q2_15min, self.t_q2_15min = create_critic(n_states_15min,
@@ -84,19 +86,30 @@ class TwoTimescaleTD3:
     def train_critic_1h(self, target_noise, noise_clip):
         experiences = self.memory_1h.sample_batch()
         states, actions, rewards, next_states, dones = experiences
-        next_mu = self.t_mu_1h(next_states)
-        epsilon = tf.random.normal(tf.shape(next_mu), stddev=target_noise)  # Target Policy Noise
+        s2_1h = next_states[:, :6]
+        s2_15min_1 = tf.concat([next_states[:, 6:11], next_states[:, 6:7], actions[:, -2:]], 1)
+        s2_15min_2 = tf.concat([next_states[:, 11:16], next_states[:, 6:7], actions[:, -2:]], 1)
+        s2_15min_3 = tf.concat([next_states[:, 16:21], next_states[:, 6:7], actions[:, -2:]], 1)
+        s2_15min_4 = tf.concat([next_states[:, 21:26], next_states[:, 6:7], actions[:, -2:]], 1)
+        actions_training = actions[:, :-2]
+        next_mu_1h = self.t_mu_1h(s2_1h)
+        next_mu_15min_1 = self.t_mu_15min(s2_15min_1)
+        next_mu_15min_2 = self.t_mu_15min(s2_15min_2)
+        next_mu_15min_3 = self.t_mu_15min(s2_15min_3)
+        next_mu_15min_4 = self.t_mu_15min(s2_15min_4)
+        next_mu_values = tf.concat([next_mu_1h, next_mu_15min_1, next_mu_15min_2, next_mu_15min_3, next_mu_15min_4], 1)
+        epsilon = tf.random.normal(tf.shape(next_mu_values), stddev=target_noise)  # Target Policy Noise
         epsilon = tf.clip_by_value(epsilon, -noise_clip, noise_clip)
-        next_mu_noise = next_mu + epsilon
-        next_mu_noise = tf.clip_by_value(next_mu_noise, tf.zeros(tf.shape(next_mu)),
-                                         tf.ones(tf.shape(next_mu)))  # valid range of actions
+        next_mu_noise = next_mu_values + epsilon
+        next_mu_noise = tf.clip_by_value(next_mu_noise, tf.zeros(tf.shape(next_mu_values)),
+                                         tf.ones(tf.shape(next_mu_values)))  # valid range of actions
         next_q_values = self.t_q_1h((next_states, next_mu_noise))
         next_q2_values = self.t_q2_1h((next_states, next_mu_noise))
         # double q network to prevent overestimate the q value
         target_q_values = rewards + (1 - dones) * self.gamma * tf.minimum(next_q_values, next_q2_values)
         with tf.GradientTape(persistent=True) as tape:
-            q1 = self.q_1h((states, actions))
-            q2 = self.q2_1h((states, actions))
+            q1 = self.q_1h((states, actions_training))
+            q2 = self.q2_1h((states, actions_training))
             q1_loss = tf.reduce_mean(self.loss_fn(target_q_values, q1))
             q2_loss = tf.reduce_mean(self.loss_fn(target_q_values, q2))
             q_loss = q1_loss + q2_loss
@@ -139,10 +152,14 @@ class TwoTimescaleTD3:
     @tf.function
     def train_actor_1h(self, experiences):
         states, actions, rewards, next_states, dones = experiences
+        s_1h = states[:, :6]
+        a_1h, a_15min_1, a_15min_2 = actions[:, :2], actions[:, 2:5], actions[:, 5:8]
+        a_15min_3, a_15min_4 = actions[:, 8:11], actions[:, 11:14]
 
         with tf.GradientTape() as tape:
-            mu = self.mu_1h(states)
-            q_mu = self.q_1h((states, mu))
+            mu = self.mu_1h(s_1h)
+            whole_actions = tf.concat([mu, a_15min_1, a_15min_2, a_15min_3, a_15min_4], 1)
+            q_mu = self.q_1h((states, whole_actions))
             mu_loss = -tf.reduce_mean(q_mu)
         mu_grads = tape.gradient(mu_loss, self.mu_1h.trainable_variables)
 

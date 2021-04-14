@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from datetime import datetime
-
+from collections import deque
 from Residential_MES import ResidentialMicrogrid
 from two_timescale_TD3 import TwoTimescaleTD3
 # ReplayBuffer
@@ -90,24 +90,32 @@ if __name__ == "__main__":
 
     for episode in range(num_train_episodes):
         t0 = datetime.now()
-        state_1h, state_15min_5states = env.reset()
+        state_1h, state_15min_6states = env.reset()
         if ss > start_steps:
             trading_actions = get_1h_action(state_1h, action_noise)
         else:
             trading_actions = env.sample_trading()
         rewards_15min = []
+        # create a list to store 4 15min states, actions, next states
+        states_15min_5states = deque([], 4)
+        next_15min_5states = deque([], 4)
+        conversion_actions_list = deque([], 4)
 
         for i in range(96):
+            # delete e_price for adding to 1h whole states
+            states_15min_5states.append(state_15min_6states[:-1])
             # concatenate two trading actions into 15min states
-            state_15min_7states = np.concatenate((state_15min_5states, trading_actions))
+            state_15min_8states = np.concatenate((state_15min_6states, trading_actions))
             if ss > start_steps:
-                conversion_actions = get_15min_action(state_15min_7states, action_noise)
+                conversion_actions = get_15min_action(state_15min_8states, action_noise)
             else:
                 conversion_actions = env.sample_conversion()
+            conversion_actions_list.append(conversion_actions)
 
             # Step the env
-            reward_15min, next_15min_5states, next_s_1h = env.convert_energy(trading_actions, conversion_actions)
+            reward_15min, next_15min_6states, next_s_1h = env.convert_energy(trading_actions, conversion_actions)
             rewards_15min.append(reward_15min)
+            next_15min_5states.append(next_15min_6states[:-1])
 
             if i == 95:
                 done = True
@@ -115,16 +123,21 @@ if __name__ == "__main__":
                 done = False
             # at the end of 1 hour, store the 1h memory
             if i % 4 == 3:
+                whole_state_1h = np.hstack((state_1h, np.concatenate(states_15min_5states)))
+                whole_action_1h = np.hstack((trading_actions, np.concatenate(conversion_actions_list)))
+                whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next_15min_5states)))
                 reward_1h = np.sum(rewards_15min[-4:])
-                td3.memory_1h.store(state_1h, trading_actions, reward_1h, next_s_1h, done)
-                state_1h = next_s_1h
+                # next trading actions
                 if ss > start_steps:
-                    trading_actions = get_1h_action(state_1h, action_noise)
+                    trading_actions = get_1h_action(next_s_1h, action_noise)
                 else:
                     trading_actions = env.sample_trading()
+                whole_action_1h = np.hstack((whole_action_1h, trading_actions))  # using for critic target
+                td3.memory_1h.store(whole_state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
+                state_1h = next_s_1h
 
-            next_15min_7states = np.concatenate((next_15min_5states, trading_actions))
-            td3.memory_15min.store(state_15min_7states, conversion_actions, reward_15min, next_15min_7states, done)
+            next_15min_8states = np.concatenate((next_15min_6states, trading_actions))
+            td3.memory_15min.store(state_15min_8states, conversion_actions, reward_15min, next_15min_8states, done)
 
             # Keep track of the number of steps done
             ss += 1
