@@ -33,19 +33,19 @@ def get_15min_action(s, noise_scale):
 def test_agent():
     test_return = []
     for test_episode in range(10):
-        s_1h, s_15min_5states = env.reset()
+        s_1h, s_15min_6states, _ = env.reset()
         trading_a = get_1h_action(s_1h, 0)
         rewards = 0
 
         for k in range(96):
             # concatenate two trading actions into 15min states
-            s_15min_7states = np.concatenate((s_15min_5states, trading_a))
-            conversion_a = get_15min_action(s_15min_7states, 0)
+            s_15min_8states = np.concatenate((s_15min_6states, trading_a))
+            conversion_a = get_15min_action(s_15min_8states, 0)
 
             # Step the env
-            reward, s2_15min_5states, s2_1h = env.convert_energy(trading_a, conversion_a)
+            reward, s2_15min_6states, s2_1h, _ = env.convert_energy(trading_a, conversion_a)
             rewards += reward
-            s_15min_5states = s2_15min_5states
+            s_15min_6states = s2_15min_6states
 
             if i % 4 == 3:
                 s_1h = s2_1h
@@ -83,27 +83,31 @@ if __name__ == "__main__":
     policy_delay = 2
 
     td3 = TwoTimescaleTD3(num_states_1h, num_actions_1h, num_states_15min, num_actions_15min,
-                          tau, q_lr, mu_lr, gamma, batch_size, replay_size)
+                          tau, q_lr, mu_lr, q_lr*0.1, mu_lr*0.1, gamma, batch_size, replay_size)
 
     test_returns = []
     returns = []
+    q_losses_1h = []
+    mu_losses_1h = []
+    q_losses_15min = []
+    mu_losses_15min = []
 
     for episode in range(num_train_episodes):
         t0 = datetime.now()
-        state_1h, state_15min_6states = env.reset()
+        state_1h, state_15min_6states, state_15min_2real = env.reset()
         if ss > start_steps:
             trading_actions = get_1h_action(state_1h, action_noise)
         else:
             trading_actions = env.sample_trading()
         rewards_15min = []
         # create a list to store 4 15min states, actions, next states
-        states_15min_5states = deque([], 4)
-        next_15min_5states = deque([], 4)
+        states_15min_3plus2 = deque([], 4)
+        next_15min_3plus2 = deque([], 4)
         conversion_actions_list = deque([], 4)
 
         for i in range(96):
             # delete e_price for adding to 1h whole states
-            states_15min_5states.append(state_15min_6states[:-1])
+            states_15min_3plus2.append(np.hstack((state_15min_6states[:3], state_15min_2real)))
             # concatenate two trading actions into 15min states
             state_15min_8states = np.concatenate((state_15min_6states, trading_actions))
             if ss > start_steps:
@@ -113,9 +117,9 @@ if __name__ == "__main__":
             conversion_actions_list.append(conversion_actions)
 
             # Step the env
-            reward_15min, next_15min_6states, next_s_1h = env.convert_energy(trading_actions, conversion_actions)
+            reward_15min, next_15min_6states, next_s_1h, next_15min_2real = env.convert_energy(trading_actions, conversion_actions)
             rewards_15min.append(reward_15min)
-            next_15min_5states.append(next_15min_6states[:-1])
+            next_15min_3plus2.append(np.hstack((next_15min_6states[:3], next_15min_2real)))
 
             if i == 95:
                 done = True
@@ -123,17 +127,16 @@ if __name__ == "__main__":
                 done = False
             # at the end of 1 hour, store the 1h memory
             if i % 4 == 3:
-                whole_state_1h = np.hstack((state_1h, np.concatenate(states_15min_5states)))
-                whole_action_1h = np.hstack((trading_actions, np.concatenate(conversion_actions_list)))
-                whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next_15min_5states)))
+                whole_state_1h = np.hstack((state_1h, np.concatenate(states_15min_3plus2)))
+                whole_action_1h = np.hstack((trading_actions, np.sum(conversion_actions_list, 0)))
+                whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next_15min_3plus2)))
                 reward_1h = np.sum(rewards_15min[-4:])
+                td3.memory_1h.store(whole_state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
                 # next trading actions
                 if ss > start_steps:
                     trading_actions = get_1h_action(next_s_1h, action_noise)
                 else:
                     trading_actions = env.sample_trading()
-                whole_action_1h = np.hstack((whole_action_1h, trading_actions))  # using for critic target
-                td3.memory_1h.store(whole_state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
                 state_1h = next_s_1h
 
             next_15min_8states = np.concatenate((next_15min_6states, trading_actions))
@@ -146,22 +149,26 @@ if __name__ == "__main__":
 
         for j in range(96):
             # update 15min critic networks
-            _, experiences_15min = td3.train_critic_15min(target_noise, noise_clip)
+            q_loss_15min, experiences_15min = td3.train_critic_15min(target_noise, noise_clip)
+            q_losses_15min.append(q_loss_15min)
             td3.soft_update(td3.q_15min, td3.t_q_15min)
             td3.soft_update(td3.q2_15min, td3.t_q2_15min)
             # delayed policy update
             if j % policy_delay == 0:
-                td3.train_actor_15min(experiences_15min)
+                mu_loss_15min = td3.train_actor_15min(experiences_15min)
+                mu_losses_15min.append(mu_loss_15min)
                 td3.soft_update(td3.mu_15min, td3.t_mu_15min)
 
             if j % 4 == 0:  # update 1h critic networks
-                _, experiences_1h = td3.train_critic_1h(target_noise, noise_clip)
+                q_loss_1h, experiences_1h = td3.train_critic_1h(target_noise, noise_clip)
+                q_losses_1h.append(q_loss_1h)
                 td3.soft_update(td3.q_1h, td3.t_q_1h)
                 td3.soft_update(td3.q2_1h, td3.t_q2_1h)
 
                 # delayed policy update
                 if j % (policy_delay * 4) == 0:
-                    td3.train_actor_1h(experiences_1h)
+                    mu_loss_1h = td3.train_actor_1h(experiences_1h)
+                    mu_losses_1h.append(mu_loss_1h)
                     td3.soft_update(td3.mu_1h, td3.t_mu_1h)
 
         total_rewards = np.sum(rewards_15min)
@@ -174,7 +181,6 @@ if __name__ == "__main__":
         if episode > 0 and episode % test_agent_every == 0:
             test_agent()
 
-
     plt.plot(returns, alpha=0.2, c='b')
     plt.plot(smooth(returns, 500), c='b')
     plt.title("Train returns")
@@ -184,3 +190,23 @@ if __name__ == "__main__":
     plt.plot(smooth(test_returns, 50), c='b')
     plt.title("Test returns")
     plt.show()
+    #
+    # plt.plot(q_losses_1h, alpha=0.2, c='b')
+    # plt.plot(smooth(q_losses_1h, 5000), c='b')
+    # plt.title("q losses 1h")
+    # plt.show()
+    #
+    # plt.plot(mu_losses_1h, alpha=0.2, c='b')
+    # plt.plot(smooth(mu_losses_1h, 5000), c='b')
+    # plt.title("mu losses 1h")
+    # plt.show()
+    #
+    # plt.plot(q_losses_15min, alpha=0.2, c='b')
+    # plt.plot(smooth(q_losses_15min, 5000), c='b')
+    # plt.title("q losses 15min")
+    # plt.show()
+    #
+    # plt.plot(mu_losses_15min, alpha=0.2, c='b')
+    # plt.plot(smooth(mu_losses_15min, 5000), c='b')
+    # plt.title("mu losses 15min")
+    # plt.show()

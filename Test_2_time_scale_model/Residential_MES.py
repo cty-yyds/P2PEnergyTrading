@@ -71,10 +71,13 @@ class ResidentialMicrogrid:
                                self.normalized_gen_dem_15min[0, 2],
                                self.battery / self.B_e, self.hydrogen / self.B_h2,
                                self.normalized_price[0, 0]))
+
+        state_15m_2real = np.hstack((self.generation_demand_15min.iloc[0, 0],
+                                     self.generation_demand_15min.iloc[0, 1]))
         # reset step
         self.step_1h = 0
         self.step_15m = 0
-        return state_1hour, state_15m
+        return state_1hour, state_15m, state_15m_2real
 
     def sample_trading(self):
         # random select trading actions
@@ -206,6 +209,9 @@ class ResidentialMicrogrid:
                            self.normalized_gen_dem_15min[self.step_15m, 2],
                            self.battery / self.B_e, self.hydrogen / self.B_h2,
                            self.normalized_price[self.step_1h, 0]))
+
+        s15m_2r = np.hstack((self.generation_demand_15min.iloc[self.step_15m, 0],
+                             self.generation_demand_15min.iloc[self.step_15m, 1]))
         # need to concatenate trading action into 15 min states
 
-        return reward / 10, s15m_, s1h_
+        return reward / 10, s15m_, s1h_, s15m_2r
