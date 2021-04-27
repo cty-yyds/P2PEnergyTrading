@@ -120,7 +120,7 @@ class TwoTimescaleTD3:
         self.loss_fn = tf.keras.losses.mean_squared_error
         self.q_optimizer_1h = tf.keras.optimizers.Nadam(learning_rate=q_lr_1h)
         self.mu_optimizer_1h = tf.keras.optimizers.Nadam(learning_rate=mu_lr_1h)
-        self.q_optimizer_15min = tf.keras.optimizers.Nadam(learning_rate=q_lr_15min, clipnorm=1.0)
+        self.q_optimizer_15min = tf.keras.optimizers.Nadam(learning_rate=q_lr_15min)
         self.mu_optimizer_15min = tf.keras.optimizers.Nadam(learning_rate=mu_lr_15min)
         self.memory_1h = ReplayBuffer(self.n_whole_s_1h, self.n_whole_a_1h, replay_capacity, batch_size)
         self.memory_15min = ReplayBuffer(self.n_whole_s_15min, self.n_whole_a_15min, replay_capacity, batch_size)
@@ -132,7 +132,7 @@ class TwoTimescaleTD3:
         self.mu_15min, self.t_mu_15min = create_actor(n_states_15min, n_actions_15min)
         self.q_15min, self.t_q_15min, self.q2_15min, self.t_q2_15min = create_critic(n_states_15min, self.n_whole_a_15min)
 
-    @tf.function
+    # @tf.function
     def train_critic_1h(self, target_noise, noise_clip):
         experiences = self.memory_1h.sample_batch()
         states, actions, rewards, next_states, dones = experiences
@@ -182,7 +182,7 @@ class TwoTimescaleTD3:
         self.q_optimizer_1h.apply_gradients(zip(q2_grads, self.q2_1h.trainable_variables))
         return q_loss, experiences
 
-    @tf.function
+    # @tf.function
     def train_critic_15min(self, target_noise, noise_clip):
         experiences = self.memory_15min.sample_batch()
         states, actions, rewards, next_states, dones = experiences
@@ -214,13 +214,14 @@ class TwoTimescaleTD3:
         q2_grads = tape.gradient(q_loss, self.q2_15min.trainable_variables)
         del tape
 
-        grads_norm = tf.norm(q1_grads[0])
+        # q1_grads = [tf.clip_by_norm(g, 1.0) for g in q1_grads]
+        # q2_grads = [tf.clip_by_norm(g, 1.0) for g in q2_grads]
         # tf.print(grads_norm)
         self.q_optimizer_15min.apply_gradients(zip(q1_grads, self.q_15min.trainable_variables))
         self.q_optimizer_15min.apply_gradients(zip(q2_grads, self.q2_15min.trainable_variables))
-        return grads_norm, experiences
+        return q_loss, experiences
 
-    @tf.function
+    # @tf.function
     def train_actor_1h(self, experiences):
         states, actions, rewards, next_states, dones = experiences
         s_1h = states[:, :6]
@@ -236,7 +237,7 @@ class TwoTimescaleTD3:
         self.mu_optimizer_1h.apply_gradients(zip(mu_grads, self.mu_1h.trainable_variables))
         return mu_loss
 
-    @tf.function
+    # @tf.function
     def train_actor_15min(self, experiences):
         states, actions, rewards, next_states, dones = experiences
         s_15min = states[:, :6]
