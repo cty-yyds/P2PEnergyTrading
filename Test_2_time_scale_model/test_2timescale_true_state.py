@@ -62,29 +62,20 @@ if __name__ == "__main__":
     env_fn = ResidentialMicrogrid(B_e=300, B_h2=30, pes_max=25, HT_p_max=3)
     env, test_env = env_fn, env_fn
 
-    num_states_1h = env.n_features_1h
-    num_actions_1h = env.n_actions_1h
-    num_states_15min = env.n_features_15min
-    num_actions_15min = env.n_actions_15min
-
     num_train_episodes = 5000
     test_agent_every = 20
-    replay_size = int(1e5)
-    gamma = 0.99
-    tau = 0.001
-    q_lr_1h = 1e-4
-    mu_lr_1h = 1e-5
-    q_lr_15min = 1e-4
-    mu_lr_15min = 1e-5
-    batch_size = 100
     start_steps = 5000
     action_noise = 0.05
     target_noise = 0.1
     noise_clip = 0.25  # 0.25
     policy_delay = 2
 
-    td3 = TwoTimescaleTD3(num_states_1h, num_actions_1h, num_states_15min, num_actions_15min,
-                          tau, q_lr_1h, mu_lr_1h, q_lr_15min, mu_lr_15min, gamma, batch_size, replay_size)
+    td3_args = {'n_states_1h': env.n_features_1h, 'n_actions_1h': env.n_actions_1h,
+                'n_states_15min': env.n_features_15min, 'n_actions_15min': env.n_actions_15min,
+                'q_lr_1h': 1e-4, 'mu_lr_1h': 1e-5, 'q_lr_15min': 1e-4, 'mu_lr_15min': 1e-5,
+                'tau': 0.001, 'gamma': 0.99, 'batch_size': 100, 'replay_capacity': int(1e5)}
+
+    td3 = TwoTimescaleTD3(**td3_args)
 
     test_returns = []
     returns = []
