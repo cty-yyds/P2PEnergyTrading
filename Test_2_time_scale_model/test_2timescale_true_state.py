@@ -38,9 +38,8 @@ def test_agent():
         rewards = 0
 
         for k in range(96):
-            # concatenate two trading actions into 15min states
-            s_15min_8states = np.concatenate((s_15min_6states, trading_a))
-            conversion_a = get_15min_action(s_15min_8states, 0)
+
+            conversion_a = get_15min_action(s_15min_6states, 0)
 
             # Step the env
             reward, s2_15min_6states, s2_1h, _ = env.convert_energy(trading_a, conversion_a)
@@ -68,13 +67,15 @@ if __name__ == "__main__":
     num_states_15min = env.n_features_15min
     num_actions_15min = env.n_actions_15min
 
-    num_train_episodes = 10000
+    num_train_episodes = 5000
     test_agent_every = 20
     replay_size = int(1e5)
     gamma = 0.99
-    tau = 0.01
-    q_lr = 1e-3
-    mu_lr = 1e-4
+    tau = 0.001
+    q_lr_1h = 1e-4
+    mu_lr_1h = 1e-5
+    q_lr_15min = 1e-4
+    mu_lr_15min = 1e-5
     batch_size = 100
     start_steps = 5000
     action_noise = 0.05
@@ -83,7 +84,7 @@ if __name__ == "__main__":
     policy_delay = 2
 
     td3 = TwoTimescaleTD3(num_states_1h, num_actions_1h, num_states_15min, num_actions_15min,
-                          tau, q_lr, mu_lr, q_lr*0.1, mu_lr*0.1, gamma, batch_size, replay_size)
+                          tau, q_lr_1h, mu_lr_1h, q_lr_15min, mu_lr_15min, gamma, batch_size, replay_size)
 
     test_returns = []
     returns = []
@@ -108,13 +109,14 @@ if __name__ == "__main__":
         for i in range(96):
             # delete e_price for adding to 1h whole states
             states_15min_3plus2.append(np.hstack((state_15min_6states[:3], state_15min_2real)))
-            # concatenate two trading actions into 15min states
-            state_15min_8states = np.concatenate((state_15min_6states, trading_actions))
+            # concatenate 1h states into 15min states for 15min critic
+            state_15min_replay = np.concatenate((state_15min_6states, state_1h))
             if ss > start_steps:
-                conversion_actions = get_15min_action(state_15min_8states, action_noise)
+                conversion_actions = get_15min_action(state_15min_6states, action_noise)
             else:
                 conversion_actions = env.sample_conversion()
             conversion_actions_list.append(conversion_actions)
+            whole_action_15min = np.concatenate((conversion_actions, trading_actions))
 
             # Step the env
             reward_15min, next_15min_6states, next_s_1h, next_15min_2real = env.convert_energy(trading_actions, conversion_actions)
@@ -132,15 +134,20 @@ if __name__ == "__main__":
                 whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next_15min_3plus2)))
                 reward_1h = np.sum(rewards_15min[-4:])
                 td3.memory_1h.store(whole_state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
+                # next states for 15min centralised critic
+                next_state_15min_replay = np.concatenate((next_15min_6states, next_s_1h))
                 # next trading actions
                 if ss > start_steps:
                     trading_actions = get_1h_action(next_s_1h, action_noise)
                 else:
                     trading_actions = env.sample_trading()
                 state_1h = next_s_1h
+            else:
+                next_state_15min_replay = np.concatenate((next_15min_6states, state_1h))
 
-            next_15min_8states = np.concatenate((next_15min_6states, trading_actions))
-            td3.memory_15min.store(state_15min_8states, conversion_actions, reward_15min, next_15min_8states, done)
+            td3.memory_15min.store(state_15min_replay, whole_action_15min, reward_15min, next_state_15min_replay, done)
+            state_15min_6states = next_15min_6states
+            state_15min_2real = next_15min_2real
 
             # Keep track of the number of steps done
             ss += 1
