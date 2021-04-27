@@ -20,7 +20,7 @@ def check_1h_15min_data(env):
 class ResidentialMicrogrid:
     def __init__(self, B_e, B_h2, pes_max, HT_p_max):
         self.n_features_1h = 6  # state: solar,E-H_demand,battery,h2_level,E_price
-        self.n_features_15min = 8  # state: solar,E-H_demand,battery,h2_level, E_price, energy trading amount_E-H
+        self.n_features_15min = 6  # state: solar,E-H_demand,battery,h2_level, E_price
         self.WE_max = 1  # Water Electrolyser input max
         self.FC_max = 1  # Fuel cell input max
         self.HB_max = 1  # Boiler hydrogen input max
