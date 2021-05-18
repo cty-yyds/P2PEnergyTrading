@@ -95,11 +95,12 @@ if __name__ == "__main__":
             trading_actions = get_1h_action(state_1h, action_noise)
         else:
             trading_actions = env.sample_trading()
+        # concatenate two trading actions into 15min states
+        state_15min_7states = np.concatenate((state_15min_5states, trading_actions))
         rewards_15min = []
 
         for i in range(96):
-            # concatenate two trading actions into 15min states
-            state_15min_7states = np.concatenate((state_15min_5states, trading_actions))
+
             if ss > start_steps:
                 conversion_actions = get_15min_action(state_15min_7states, action_noise)
             else:
@@ -125,6 +126,7 @@ if __name__ == "__main__":
 
             next_15min_7states = np.concatenate((next_15min_5states, trading_actions))
             td3.memory_15min.store(state_15min_7states, conversion_actions, reward_15min, next_15min_7states, done)
+            state_15min_7states = next_15min_7states
 
             # Keep track of the number of steps done
             ss += 1
