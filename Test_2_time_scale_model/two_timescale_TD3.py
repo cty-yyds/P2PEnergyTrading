@@ -80,7 +80,7 @@ class TwoTimescaleTD3:
         self.q_15min, self.t_q_15min, self.q2_15min, self.t_q2_15min = create_critic(n_states_15min,
                                                                                      n_actions_15min)
 
-    @tf.function
+    # @tf.function
     def train_critic_1h(self, target_noise, noise_clip):
         experiences = self.memory_1h.sample_batch()
         states, actions, rewards, next_states, dones = experiences
@@ -108,7 +108,7 @@ class TwoTimescaleTD3:
         self.q_optimizer.apply_gradients(zip(q2_grads, self.q2_1h.trainable_variables))
         return q_loss, experiences
 
-    @tf.function
+    # @tf.function
     def train_critic_15min(self, target_noise, noise_clip):
         experiences = self.memory_15min.sample_batch()
         states, actions, rewards, next_states, dones = experiences
@@ -136,7 +136,7 @@ class TwoTimescaleTD3:
         self.q_optimizer.apply_gradients(zip(q2_grads, self.q2_15min.trainable_variables))
         return q_loss, experiences
 
-    @tf.function
+    # @tf.function
     def train_actor_1h(self, experiences):
         states, actions, rewards, next_states, dones = experiences
 
@@ -149,7 +149,7 @@ class TwoTimescaleTD3:
         self.mu_optimizer.apply_gradients(zip(mu_grads, self.mu_1h.trainable_variables))
         return mu_loss
 
-    @tf.function
+    # @tf.function
     def train_actor_15min(self, experiences):
         states, actions, rewards, next_states, dones = experiences
 
