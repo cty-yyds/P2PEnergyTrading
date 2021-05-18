@@ -33,7 +33,7 @@ def get_15min_action(s, noise_scale):
 def test_agent():
     test_return = []
     for test_episode in range(10):
-        s_1h, s_15min_6states, _ = env.reset()
+        s_1h, s_15min_6states, _ = test_env.reset()
         trading_a = get_1h_action(s_1h, 0)
         rewards = 0
 
@@ -42,11 +42,11 @@ def test_agent():
             conversion_a = get_15min_action(s_15min_6states, 0)
 
             # Step the env
-            reward, s2_15min_6states, s2_1h, _ = env.convert_energy(trading_a, conversion_a)
+            reward, s2_15min_6states, s2_1h, _ = test_env.convert_energy(trading_a, conversion_a)
             rewards += reward
             s_15min_6states = s2_15min_6states
 
-            if i % 4 == 3:
+            if k % 4 == 3:
                 s_1h = s2_1h
                 trading_a = get_1h_action(s_1h, 0)
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     env_fn = ResidentialMicrogrid(B_e=300, B_h2=30, pes_max=25, HT_p_max=3)
     env, test_env = env_fn, env_fn
 
-    num_train_episodes = 5000
+    num_train_episodes = 2000
     test_agent_every = 20
     start_steps = 5000
     action_noise = 0.05
