@@ -20,7 +20,7 @@ def check_1h_15min_data(env):
 class ResidentialMicrogrid:
     def __init__(self, B_e, B_h2, pes_max, HT_p_max):
         self.n_features_1h = 6  # state: solar,E-H_demand,battery,h2_level,E_price
-        self.n_features_15min = 7  # state: solar,E-H_demand,battery,h2_level, energy trading amount_E-H
+        self.n_features_15min = 6  # state: solar,E-H_demand,battery,h2_level, E_price
         self.WE_max = 1  # Water Electrolyser input max
         self.FC_max = 1  # Fuel cell input max
         self.HB_max = 1  # Boiler hydrogen input max
@@ -69,11 +69,15 @@ class ResidentialMicrogrid:
         state_15m = np.hstack((self.normalized_gen_dem_15min[0, 0],
                                self.normalized_gen_dem_15min[0, 1],
                                self.normalized_gen_dem_15min[0, 2],
-                               self.battery / self.B_e, self.hydrogen / self.B_h2))
+                               self.battery / self.B_e, self.hydrogen / self.B_h2,
+                               self.normalized_price[0, 0]))
+
+        state_15m_2real = np.hstack((self.generation_demand_15min.iloc[0, 0],
+                                     self.generation_demand_15min.iloc[0, 1]))
         # reset step
         self.step_1h = 0
         self.step_15m = 0
-        return state_1hour, state_15m
+        return state_1hour, state_15m, state_15m_2real
 
     def sample_trading(self):
         # random select trading actions
@@ -203,7 +207,11 @@ class ResidentialMicrogrid:
         s15m_ = np.hstack((self.normalized_gen_dem_15min[self.step_15m, 0],
                            self.normalized_gen_dem_15min[self.step_15m, 1],
                            self.normalized_gen_dem_15min[self.step_15m, 2],
-                           self.battery / self.B_e, self.hydrogen / self.B_h2))
+                           self.battery / self.B_e, self.hydrogen / self.B_h2,
+                           self.normalized_price[self.step_1h, 0]))
+
+        s15m_2r = np.hstack((self.generation_demand_15min.iloc[self.step_15m, 0],
+                             self.generation_demand_15min.iloc[self.step_15m, 1]))
         # need to concatenate trading action into 15 min states
 
-        return reward / 10, s15m_, s1h_
+        return reward / 10, s15m_, s1h_, s15m_2r
