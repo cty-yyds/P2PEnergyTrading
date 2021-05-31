@@ -91,6 +91,8 @@ if __name__ == "__main__":
             trading_actions = get_1h_action(state_1h, action_noise)
         else:
             trading_actions = env.sample_trading()
+        # concatenate two trading actions into 15min states
+        state_15min_7states = np.concatenate((state_15min_5states, trading_actions))
         rewards_15min = []
         # create a list to store 4 15min states, actions, next states
         states_15min_3plus2 = deque([], 4)
@@ -102,6 +104,7 @@ if __name__ == "__main__":
             states_15min_3plus2.append(np.hstack((state_15min_6states[:3], state_15min_2real)))
             # concatenate 1h states into 15min states for 15min critic
             state_15min_replay = np.concatenate((state_15min_6states, state_1h))
+
             if ss > start_steps:
                 conversion_actions = get_15min_action(state_15min_6states, action_noise)
             else:
