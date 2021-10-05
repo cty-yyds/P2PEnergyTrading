@@ -92,14 +92,11 @@ if __name__ == "__main__":
         else:
             trading_actions = env.sample_trading()
         rewards_15min = []
-        # create a list to store 4 15min states, actions, next states
-        states_15min_3plus2 = deque([], 4)
-        next_15min_3plus2 = deque([], 4)
+        # create a list to store 4 actions, next states
+        next1h_15min_states_3plus2 = deque([], 4)
         conversion_actions_list = deque([], 4)
 
         for i in range(96):
-            # delete e_price for adding to 1h whole states
-            states_15min_3plus2.append(np.hstack((state_15min_6states[:3], state_15min_2real)))
             # concatenate 1h states into 15min states for 15min critic
             state_15min_replay = np.concatenate((state_15min_6states, state_1h))
             if ss > start_steps:
@@ -110,9 +107,10 @@ if __name__ == "__main__":
             whole_action_15min = np.concatenate((conversion_actions, trading_actions))
 
             # Step the env
-            reward_15min, next_15min_6states, next_s_1h, next_15min_2real = env.convert_energy(trading_actions, conversion_actions)
+            reward_15min, next_15min_6states, next_s_1h, next1h_15min_s_3plus2 = env.convert_energy(trading_actions, conversion_actions)
             rewards_15min.append(reward_15min)
-            next_15min_3plus2.append(np.hstack((next_15min_6states[:3], next_15min_2real)))
+            # delete e_price for adding to 1h whole states
+            next1h_15min_states_3plus2.append(next1h_15min_s_3plus2)
 
             if i == 95:
                 done = True
@@ -120,11 +118,10 @@ if __name__ == "__main__":
                 done = False
             # at the end of 1 hour, store the 1h memory
             if i % 4 == 3:
-                whole_state_1h = np.hstack((state_1h, np.concatenate(states_15min_3plus2)))
                 whole_action_1h = np.hstack((trading_actions, np.sum(conversion_actions_list, 0)))
-                whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next_15min_3plus2)))
+                whole_next_state_1h = np.hstack((next_s_1h, np.concatenate(next1h_15min_states_3plus2)))
                 reward_1h = np.sum(rewards_15min[-4:])
-                td3.memory_1h.store(whole_state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
+                td3.memory_1h.store(state_1h, whole_action_1h, reward_1h, whole_next_state_1h, done)
                 # next states for 15min centralised critic
                 next_state_15min_replay = np.concatenate((next_15min_6states, next_s_1h))
                 # next trading actions
@@ -138,7 +135,6 @@ if __name__ == "__main__":
 
             td3.memory_15min.store(state_15min_replay, whole_action_15min, reward_15min, next_state_15min_replay, done)
             state_15min_6states = next_15min_6states
-            state_15min_2real = next_15min_2real
 
             # Keep track of the number of steps done
             ss += 1

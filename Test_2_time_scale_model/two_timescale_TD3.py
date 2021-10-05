@@ -3,9 +3,9 @@ import tensorflow as tf
 
 
 class ReplayBuffer:
-    def __init__(self, obs_dim, act_dim, size, batch_size=32):
+    def __init__(self, obs_dim, obs2_dim, act_dim, size, batch_size=32):
         self.obs1_buf = np.zeros([size, obs_dim], dtype=np.float32)
-        self.obs2_buf = np.zeros([size, obs_dim], dtype=np.float32)
+        self.obs2_buf = np.zeros([size, obs2_dim], dtype=np.float32)
         self.acts_buf = np.zeros([size, act_dim], dtype=np.float32)
         self.rews_buf = np.zeros(size, dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
@@ -122,8 +122,9 @@ class TwoTimescaleTD3:
         self.mu_optimizer_1h = tf.keras.optimizers.Nadam(learning_rate=mu_lr_1h)
         self.q_optimizer_15min = tf.keras.optimizers.Nadam(learning_rate=q_lr_15min)
         self.mu_optimizer_15min = tf.keras.optimizers.Nadam(learning_rate=mu_lr_15min)
-        self.memory_1h = ReplayBuffer(self.n_whole_s_1h, self.n_whole_a_1h, replay_capacity, batch_size)
-        self.memory_15min = ReplayBuffer(self.n_whole_s_15min, self.n_whole_a_15min, replay_capacity, batch_size)
+        self.memory_1h = ReplayBuffer(n_states_1h, self.n_whole_s_1h, self.n_whole_a_1h, replay_capacity, batch_size)
+        self.memory_15min = ReplayBuffer(self.n_whole_s_15min, self.n_whole_s_15min, self.n_whole_a_15min,
+                                         replay_capacity, batch_size)
 
         # Now create the model (2 timescale, double Q, target networks) whole centralised critic with 4 15min s and a
         self.mu_1h, self.t_mu_1h = create_actor(n_states_1h, n_actions_1h)
@@ -136,7 +137,7 @@ class TwoTimescaleTD3:
     def train_critic_1h(self, target_noise, noise_clip):
         experiences = self.memory_1h.sample_batch()
         states, actions, rewards, next_states, dones = experiences
-        s_1h = states[:, :6]
+        s_1h = states
         s2_1h = next_states[:, :6]
         next_mu_1h = self.t_mu_1h(s2_1h)
 
@@ -224,7 +225,7 @@ class TwoTimescaleTD3:
     # @tf.function
     def train_actor_1h(self, experiences):
         states, actions, rewards, next_states, dones = experiences
-        s_1h = states[:, :6]
+        s_1h = states
         a_15min = actions[:, 2:]
 
         with tf.GradientTape() as tape:

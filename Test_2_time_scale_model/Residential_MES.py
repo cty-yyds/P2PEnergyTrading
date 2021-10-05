@@ -40,7 +40,7 @@ class ResidentialMicrogrid:
 
     def build_MG(self):
         self.generation_demand_1hour = pd.read_pickle('res_mg_1hour.pkl')['2019-5-15':'2019-05-16 00:00:00	']
-        self.generation_demand_15min = pd.read_pickle('res_mg_15min.pkl')['2019-5-15':'2019-05-16 00:00:00	']
+        self.generation_demand_15min = pd.read_pickle('res_mg_15min.pkl')['2019-5-15':'2019-05-16 01:00:00	']
         self.price = pd.read_pickle('2018price.pkl')['2018-05-16':'2018-05-17 00:00:00	']  # Electricity price ($/Kwh)
         scaler1 = StandardScaler()
         scaler2 = StandardScaler()
@@ -210,8 +210,12 @@ class ResidentialMicrogrid:
                            self.battery / self.B_e, self.hydrogen / self.B_h2,
                            self.normalized_price[self.step_1h, 0]))
 
-        s15m_2r = np.hstack((self.generation_demand_15min.iloc[self.step_15m, 0],
-                             self.generation_demand_15min.iloc[self.step_15m, 1]))
-        # need to concatenate trading action into 15 min states
+        # next hour 15 min states (3plus2) to calculate next 1h target energy conversion action for 1h critic training
+        s1h_15m_3np2r = np.hstack((self.normalized_gen_dem_15min[self.step_15m+3, 0],
+                                   self.normalized_gen_dem_15min[self.step_15m+3, 1],
+                                   self.normalized_gen_dem_15min[self.step_15m+3, 2],
+                                   self.generation_demand_15min.iloc[self.step_15m+3, 0],
+                                   self.generation_demand_15min.iloc[self.step_15m+3, 1]))
 
-        return reward / 10, s15m_, s1h_, s15m_2r
+        # return reward / 10, s15m_, s1h_, s1h_15m_3np2r, E_battery  # for load prediction
+        return reward / 10, s15m_, s1h_, s1h_15m_3np2r
