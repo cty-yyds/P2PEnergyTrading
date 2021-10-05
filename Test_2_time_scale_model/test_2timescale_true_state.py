@@ -179,6 +179,10 @@ if __name__ == "__main__":
         if episode > 0 and episode % test_agent_every == 0:
             test_agent()
 
+    # save the drl model
+    td3.mu_1h.save("1h_model.h5")
+    td3.mu_15min.save("15min_model.h5")
+
     plt.plot(returns, alpha=0.2, c='b')
     plt.plot(smooth(returns, 500), c='b')
     plt.title("Train returns")
