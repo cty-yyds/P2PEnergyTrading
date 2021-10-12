@@ -110,9 +110,12 @@ def calculate_ess_15min(energy_conversion, energy_trading, states, ess_level):
 
 class TwoTimescaleTD3:
     def __init__(self, n_states_1h, n_actions_1h, n_states_15min, n_actions_15min,
-                 tau, q_lr_1h, mu_lr_1h, q_lr_15min, mu_lr_15min, gamma, batch_size, replay_capacity):
+                 tau, q_lr_1h, mu_lr_1h, q_lr_15min, mu_lr_15min, gamma, batch_size,
+                 replay_capacity, target_noise, target_noise_clip):
         self.tau = tau
         self.gamma = gamma
+        self.t_noise = target_noise
+        self.t_n_clip = target_noise_clip
         self.n_whole_s_1h = n_states_1h + 5 * 4
         self.n_whole_a_1h = n_actions_1h + n_actions_15min
         self.n_whole_s_15min = n_states_15min + n_states_1h
@@ -125,6 +128,8 @@ class TwoTimescaleTD3:
         self.memory_1h = ReplayBuffer(n_states_1h, self.n_whole_s_1h, self.n_whole_a_1h, replay_capacity, batch_size)
         self.memory_15min = ReplayBuffer(self.n_whole_s_15min, self.n_whole_s_15min, self.n_whole_a_15min,
                                          replay_capacity, batch_size)
+        self.experience_1h = None
+        self.experience_15min = None
 
         # Now create the model (2 timescale, double Q, target networks) whole centralised critic with 4 15min s and a
         self.mu_1h, self.t_mu_1h = create_actor(n_states_1h, n_actions_1h)
@@ -133,10 +138,8 @@ class TwoTimescaleTD3:
         self.mu_15min, self.t_mu_15min = create_actor(n_states_15min, n_actions_15min)
         self.q_15min, self.t_q_15min, self.q2_15min, self.t_q2_15min = create_critic(n_states_15min, self.n_whole_a_15min)
 
-    # @tf.function
-    def train_critic_1h(self, target_noise, noise_clip):
-        experiences = self.memory_1h.sample_batch()
-        states, actions, rewards, next_states, dones = experiences
+    @tf.function
+    def tf_train_critic_1h_step(self, states, actions, rewards, next_states, dones):
         s_1h = states
         s2_1h = next_states[:, :6]
         next_mu_1h = self.t_mu_1h(s2_1h)
@@ -160,8 +163,8 @@ class TwoTimescaleTD3:
         next_mu_15min = next_mu_15min_1 + next_mu_15min_2 + next_mu_15min_3 + next_mu_15min_4
         next_mu_values = tf.concat([next_mu_1h, next_mu_15min], 1)
 
-        epsilon = tf.random.normal(tf.shape(next_mu_values), stddev=target_noise)  # Target Policy Noise
-        epsilon = tf.clip_by_value(epsilon, -noise_clip, noise_clip)
+        epsilon = tf.random.normal(tf.shape(next_mu_values), stddev=self.t_noise)  # Target Policy Noise
+        epsilon = tf.clip_by_value(epsilon, -self.t_n_clip, self.t_n_clip)
         next_mu_noise = next_mu_values + epsilon
         next_mu_noise = tf.clip_by_value(next_mu_noise, tf.zeros(tf.shape(next_mu_values)),
                                          tf.ones(tf.shape(next_mu_values)))  # valid range of actions
@@ -181,12 +184,16 @@ class TwoTimescaleTD3:
 
         self.q_optimizer_1h.apply_gradients(zip(q1_grads, self.q_1h.trainable_variables))
         self.q_optimizer_1h.apply_gradients(zip(q2_grads, self.q2_1h.trainable_variables))
-        return q_loss, experiences
+        return q_loss
 
-    # @tf.function
-    def train_critic_15min(self, target_noise, noise_clip):
-        experiences = self.memory_15min.sample_batch()
-        states, actions, rewards, next_states, dones = experiences
+    def train_critic_1h(self):
+        self.experience_1h = self.memory_1h.sample_batch()
+        states, actions, rewards, next_states, dones = self.experience_1h
+        q_loss = self.tf_train_critic_1h_step(states, actions, rewards, next_states, dones)
+        return q_loss
+
+    @tf.function
+    def tf_train_critic_15min_step(self, states, actions, rewards, next_states, dones):
         s_15min = states[:, :6]
         s2_15min = next_states[:, :6]
         next_mu_15min = self.t_mu_15min(s2_15min)
@@ -196,8 +203,8 @@ class TwoTimescaleTD3:
         next_mu_1h = self.t_mu_1h(s2_1h)
 
         next_mu_values = tf.concat([next_mu_15min, next_mu_1h], 1)
-        epsilon = tf.random.normal(tf.shape(next_mu_values), stddev=target_noise)  # Target Policy Noise
-        epsilon = tf.clip_by_value(epsilon, -noise_clip, noise_clip)
+        epsilon = tf.random.normal(tf.shape(next_mu_values), stddev=self.t_noise)  # Target Policy Noise
+        epsilon = tf.clip_by_value(epsilon, -self.t_n_clip, self.t_n_clip)
         next_mu_noise = next_mu_values + epsilon
         next_mu_noise = tf.clip_by_value(next_mu_noise, tf.zeros(tf.shape(next_mu_values)),
                                          tf.ones(tf.shape(next_mu_values)))  # valid range of actions
@@ -220,11 +227,16 @@ class TwoTimescaleTD3:
         # tf.print(grads_norm)
         self.q_optimizer_15min.apply_gradients(zip(q1_grads, self.q_15min.trainable_variables))
         self.q_optimizer_15min.apply_gradients(zip(q2_grads, self.q2_15min.trainable_variables))
-        return q_loss, experiences
+        return q_loss
 
-    # @tf.function
-    def train_actor_1h(self, experiences):
-        states, actions, rewards, next_states, dones = experiences
+    def train_critic_15min(self):
+        self.experience_15min = self.memory_15min.sample_batch()
+        states, actions, rewards, next_states, dones = self.experience_15min
+        q_loss = self.tf_train_critic_15min_step(states, actions, rewards, next_states, dones)
+        return q_loss
+
+    @tf.function
+    def tf_train_actor_1h_step(self, states, actions):
         s_1h = states
         a_15min = actions[:, 2:]
 
@@ -238,9 +250,13 @@ class TwoTimescaleTD3:
         self.mu_optimizer_1h.apply_gradients(zip(mu_grads, self.mu_1h.trainable_variables))
         return mu_loss
 
-    # @tf.function
-    def train_actor_15min(self, experiences):
-        states, actions, rewards, next_states, dones = experiences
+    def train_actor_1h(self):
+        states, actions, rewards, next_states, dones = self.experience_1h
+        mu_loss = self.tf_train_actor_1h_step(states, actions)
+        return mu_loss
+
+    @tf.function
+    def tf_train_actor_15min_step(self, states, actions):
         s_15min = states[:, :6]
         a_1h = actions[:, 3:]
 
@@ -252,6 +268,11 @@ class TwoTimescaleTD3:
         mu_grads = tape.gradient(mu_loss, self.mu_15min.trainable_variables)
 
         self.mu_optimizer_15min.apply_gradients(zip(mu_grads, self.mu_15min.trainable_variables))
+        return mu_loss
+
+    def train_actor_15min(self):
+        states, actions, rewards, next_states, dones = self.experience_15min
+        mu_loss = self.tf_train_actor_15min_step(states, actions)
         return mu_loss
 
     def soft_update(self, model, target_model):

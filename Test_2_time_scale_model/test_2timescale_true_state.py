@@ -66,14 +66,13 @@ if __name__ == "__main__":
     test_agent_every = 20
     start_steps = 5000
     action_noise = 0.05
-    target_noise = 0.1
-    noise_clip = 0.25  # 0.25
     policy_delay = 2
 
     td3_args = {'n_states_1h': env.n_features_1h, 'n_actions_1h': env.n_actions_1h,
                 'n_states_15min': env.n_features_15min, 'n_actions_15min': env.n_actions_15min,
                 'q_lr_1h': 1e-4, 'mu_lr_1h': 1e-5, 'q_lr_15min': 1e-4, 'mu_lr_15min': 1e-5,
-                'tau': 0.001, 'gamma': 0.99, 'batch_size': 100, 'replay_capacity': int(1e5)}
+                'tau': 0.001, 'gamma': 0.99, 'batch_size': 100, 'replay_capacity': int(1e5),
+                'target_noise': 0.1, 'target_noise_clip': 0.25}
 
     td3 = TwoTimescaleTD3(**td3_args)
 
@@ -143,25 +142,25 @@ if __name__ == "__main__":
 
         for j in range(96):
             # update 15min critic networks
-            q_loss_15min, experiences_15min = td3.train_critic_15min(target_noise, noise_clip)
+            q_loss_15min = td3.train_critic_15min()
             q_losses_15min.append(q_loss_15min)
             td3.soft_update(td3.q_15min, td3.t_q_15min)
             td3.soft_update(td3.q2_15min, td3.t_q2_15min)
             # delayed policy update
             if j % policy_delay == 0:
-                mu_loss_15min = td3.train_actor_15min(experiences_15min)
+                mu_loss_15min = td3.train_actor_15min()
                 mu_losses_15min.append(mu_loss_15min)
                 td3.soft_update(td3.mu_15min, td3.t_mu_15min)
 
             if j % 4 == 0:  # update 1h critic networks
-                q_loss_1h, experiences_1h = td3.train_critic_1h(target_noise, noise_clip)
+                q_loss_1h = td3.train_critic_1h()
                 q_losses_1h.append(q_loss_1h)
                 td3.soft_update(td3.q_1h, td3.t_q_1h)
                 td3.soft_update(td3.q2_1h, td3.t_q2_1h)
 
                 # delayed policy update
                 if j % (policy_delay * 4) == 0:
-                    mu_loss_1h = td3.train_actor_1h(experiences_1h)
+                    mu_loss_1h = td3.train_actor_1h()
                     mu_losses_1h.append(mu_loss_1h)
                     td3.soft_update(td3.mu_1h, td3.t_mu_1h)
 
